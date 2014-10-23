@@ -13,8 +13,8 @@ import qualified Haskakafka as K
 
 ------------------------------------------------------------------------------
 data App = App
-    { _kafka  :: K.Kafka,
-      _topics :: (Map.Map String K.KafkaTopic) }
+    { _kafkaConnection  :: K.Kafka,
+      _domains :: (Map.Map String K.KafkaTopic) }
 
 makeLenses ''App
 

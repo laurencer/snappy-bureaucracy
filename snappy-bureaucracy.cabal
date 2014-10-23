@@ -19,7 +19,7 @@ Flag old-base
   manual: False
 
 Executable snappy-bureaucracy
-  hs-source-dirs: src
+  hs-source-dirs: src src/gen-hs
   main-is: Main.hs
 
   Build-depends:
@@ -36,7 +36,13 @@ Executable snappy-bureaucracy
     snap-loader-static        >= 0.9     && < 0.10,
     text                      >= 0.11    && < 1.3,
     time                      >= 1.1     && < 1.5,
-    xmlhtml                   >= 0.1     && < 0.3
+    thrift                    >= 1.0     && < 1.1,
+    xmlhtml                   >= 0.1     && < 0.3,
+
+    hashable                  >= 1.2     && < 1.3,
+    unordered-containers      == 0.2.5.1,
+    vector                    >= 0.10    && < 0.11,
+    attoparsec                >= 0.12    && < 0.13
 
   if flag(old-base)
     build-depends:
@@ -60,7 +66,7 @@ Executable snappy-bureaucracy
   else
     if impl(ghc >= 6.12.0)
       ghc-options: -threaded -Wall -fwarn-tabs -funbox-strict-fields -O2
-                   -fno-warn-orphans -fno-warn-unused-do-bind
+                   -fno-warn-orphans -fno-warn-unused-do-bind -rtsopts -optc-O3
     else
       ghc-options: -threaded -Wall -fwarn-tabs -funbox-strict-fields -O2
-                   -fno-warn-orphans
+                   -fno-warn-orphans -rtsopts

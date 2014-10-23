@@ -8,16 +8,18 @@ module Site
 ------------------------------------------------------------------------------
 import           Control.Applicative
 import           Control.Monad.State
-import           Control.Monad.Trans
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as C
-import           Data.IORef
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import qualified Haskakafka as K
 import           Snap.Core
 import           Snap.Snaplet
 import           Text.InterpolatedString.Perl6 (qc)
+import           CompactThrift
+import qualified Data.Attoparsec.ByteString.Lazy as ABL
+
 ------------------------------------------------------------------------------
 import           Application
 
@@ -28,29 +30,39 @@ messageHandler :: AppHandler ()
 messageHandler = do
       topic      <- (maybe (C.pack "no topic") id) <$> getParam "topic"
       req        <- getRequest
+      body       <- readRequestBody 10485760
+      result     <- liftIO $ (validateMessage body)
       source     <- return $ getHeader "X-Source-System" req
       uniqueId   <- return $ getHeader "X-Unique-Id" req
-      result     <- send (C.unpack topic)
-      writeBS [qc|The source is {source} and the uniqueId is {uniqueId}. Sent message to {topic}: {result}|]
+      if (Maybe.isJust (ABL.maybeResult result)) then goodMessage topic body else badMessage
+  where
+    goodMessage topic body = do
+      result     <- send (C.unpack topic) (LBS.toStrict body)
+      modifyResponse $ setResponseCode 200
+    badMessage = do
+      modifyResponse $ setResponseCode 400    
+
+validateMessage str = do
+  result  <- return $ ABL.parse parseCompactStruct str
+  return $ result
+
+send :: String -> ByteString -> AppHandler ()
+send topic message = do
+  topics <- gets _domains
+  liftIO $ do
+    message     <- return $ K.KafkaProduceMessage message
+    kafkaTopic  <- return $ Maybe.fromJust (Map.lookup topic topics)
+    maybeErr    <- K.produceMessage kafkaTopic K.KafkaUnassignedPartition message
+    return ()
 
 ------------------------------------------------------------------------------
 -- | The application's routes.
 routes :: [(ByteString, Handler App App ())]
-routes = [ ("/:topic/message",    method POST messageHandler)
+routes = [ ("/v1/:topic/message",    method POST messageHandler)
          ]
 
 ------------------------------------------------------------------------------
 -- | The application initializer.
-
-
-send :: String -> AppHandler ()
-send topic = do
-  topics <- gets _topics
-  liftIO $ do
-    message     <- return $ K.KafkaProduceMessage (C.pack "test")
-    kafkaTopic  <- return $ Maybe.fromJust (Map.lookup topic topics)
-    maybeErr    <- K.produceMessage kafkaTopic K.KafkaUnassignedPartition message
-    return ()
 
 
 openKafkaProducer :: IO K.Kafka
