@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes, ExtendedDefaultRules #-}
 
-module Site
+module Bureaucracy.Site
   ( app
   ) where
 
@@ -17,11 +17,16 @@ import qualified Haskakafka as K
 import           Snap.Core
 import           Snap.Snaplet
 import           Text.InterpolatedString.Perl6 (qc)
-import           CompactThrift
+
+import           Bureaucracy.Thrift.CompactThrift
+
 import qualified Data.Attoparsec.ByteString.Lazy as ABL
 
+
+import Bureaucracy.Thrift.LanguageThrift ()
+
 ------------------------------------------------------------------------------
-import           Application
+import           Bureaucracy.Application
 
 
 ------------------------------------------------------------------------------
@@ -31,29 +36,39 @@ messageHandler = do
       topic      <- (maybe (C.pack "no topic") id) <$> getParam "topic"
       req        <- getRequest
       body       <- readRequestBody 10485760
-      result     <- liftIO $ (validateMessage body)
+      strictBody <- return $ LBS.toStrict body
+      result     <- return $ validateMessage body
       source     <- return $ getHeader "X-Source-System" req
       uniqueId   <- return $ getHeader "X-Unique-Id" req
-      if (Maybe.isJust (ABL.maybeResult result)) then goodMessage topic body else badMessage
+      if (Maybe.isJust (ABL.maybeResult result)) 
+        then goodMessage topic strictBody 
+        else badMessage topic strictBody
   where
     goodMessage topic body = do
-      result     <- send (C.unpack topic) (LBS.toStrict body)
-      modifyResponse $ setResponseCode 200
-    badMessage = do
-      modifyResponse $ setResponseCode 400    
+      sendResult <- send (C.unpack topic) body
+      maybe (modifyResponse $ setResponseCode 200) handleKafkaError sendResult
+    badMessage topic body = do
+      sendResult <- send [qc|{C.unpack topic}.bad|] body
+      maybe (modifyResponse $ setResponseCode 400) handleKafkaError sendResult
 
-validateMessage str = do
-  result  <- return $ ABL.parse parseCompactStruct str
-  return $ result
+-- | Ensures that the message is valid.
+validateMessage bytes =
+  ABL.parse parseCompactStruct bytes
 
-send :: String -> ByteString -> AppHandler ()
+-- | Generates a response where there is a KafkaError.
+handleKafkaError :: K.KafkaError -> AppHandler ()
+handleKafkaError err = do
+  writeBS [qc|Could not write to Kafka Queue: {err}|]
+  modifyResponse $ setResponseCode 500
+
+-- | Sends a message to a Kafka queue synchronously.
+send :: String -> ByteString -> AppHandler (Maybe K.KafkaError)
 send topic message = do
   topics <- gets _domains
   liftIO $ do
     message     <- return $ K.KafkaProduceMessage message
     kafkaTopic  <- return $ Maybe.fromJust (Map.lookup topic topics)
-    maybeErr    <- K.produceMessage kafkaTopic K.KafkaUnassignedPartition message
-    return ()
+    K.produceMessage kafkaTopic K.KafkaUnassignedPartition message
 
 ------------------------------------------------------------------------------
 -- | The application's routes.
@@ -80,6 +95,6 @@ openKafkaTopic kafka topic = do
 app :: SnapletInit App App
 app = makeSnaplet "app" "Snappy Bureaucracy." Nothing $ do
     k   <- liftIO $ openKafkaProducer
-    t   <- liftIO $ (Map.singleton "foo") <$> (openKafkaTopic k "foo")
+    t   <- liftIO $ (Map.singleton "rdbms_changes") <$> (openKafkaTopic k "rdbms_changes")
     addRoutes routes
     return $ App k t

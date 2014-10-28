@@ -22,7 +22,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module CompactThrift where
+module Bureaucracy.Thrift.CompactThrift where
 
 import Control.Applicative
 import Control.Exception ( throw )
@@ -40,6 +40,8 @@ import Data.Text.Lazy.Encoding ( decodeUtf8, encodeUtf8 )
 import Thrift.Protocol hiding (versionMask)
 import Thrift.Transport
 import Thrift.Types
+
+import qualified Bureaucracy.Thrift.VarInt as VarInt
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
@@ -233,13 +235,9 @@ buildVarint n | n .&. complement 0x7F == 0 = B.word8 $ fromIntegral n
               | otherwise = B.word8 (0x80 .|. (fromIntegral n .&. 0x7F)) <>
                             buildVarint (n `shiftR` 7)
 
-parseVarint :: (Bits a, Integral a, Ord a) => (a -> b) -> Parser b
-parseVarint fromZigZag = do
-  bytestemp <- BS.unpack <$> P.takeTill (not . flip testBit 7)
-  lsb <- P.anyWord8
-  let bytes = lsb : List.reverse bytestemp
-  return $ fromZigZag $ List.foldl' combine 0x00 bytes
-  where combine a b = (a `shiftL` 7) .|. (fromIntegral b .&. 0x7f)
+parseVarint :: (VarInt.VarInt a, Bits a, Integral a, Ord a) => (a -> b) -> Parser b
+parseVarint fromZigZag =
+  fromZigZag <$> VarInt.parse
 
 -- | Compute the Compact Type
 fromTType :: ThriftType -> Word8
